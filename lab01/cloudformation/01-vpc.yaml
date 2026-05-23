@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NT548 Lab01 - VPC Stack
+  Tao VPC voi Public/Private Subnet, IGW, NAT Gateway, Route Tables
+
+# ==============================================================
+# PARAMETERS — Người dùng nhập khi deploy stack
+# ==============================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: nt548-lab01
+    Description: Tien to dat ten cho tat ca resources
+
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block cua VPC
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR cua Public Subnet
+
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: CIDR cua Private Subnet
+
+# ==============================================================
+# RESOURCES — Các tài nguyên sẽ được tạo
+# ==============================================================
+Resources:
+
+  # --- VPC ---------------------------------------------------
+  # Giải thích: VPC là mạng ảo riêng tư của bạn trên AWS
+  # EnableDnsHostnames/Support = cho phép EC2 có DNS hostname
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-vpc
+
+  # --- Internet Gateway ---------------------------------------
+  # IGW = cổng kết nối VPC ra Internet
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-igw
+
+  # Gắn IGW vào VPC (bắt buộc sau khi tạo)
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # --- Public Subnet ------------------------------------------
+  # Subnet kết nối được Internet (vì có route table trỏ tới IGW)
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      # Lấy AZ đầu tiên của Region (ap-southeast-1a)
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true   # EC2 trong subnet này tự có Public IP
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-subnet
+
+  # --- Private Subnet -----------------------------------------
+  # Subnet không kết nối trực tiếp Internet
+  # Ra ngoài phải qua NAT Gateway (bảo mật hơn)
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-private-subnet
+
+  # --- Elastic IP cho NAT Gateway -----------------------------
+  # NAT GW cần 1 IP tĩnh để traffic từ Private Subnet ra Internet
+  NatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: IGWAttachment   # Phải có IGW trước mới tạo được EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nat-eip
+
+  # --- NAT Gateway --------------------------------------------
+  # Cho phép Private Subnet ra Internet mà không expose IP thật
+  # NAT GW phải đặt trong PUBLIC Subnet (không phải Private)
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet   # ← Đặt trong Public Subnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-nat-gw
+
+  # --- Public Route Table ------------------------------------
+  # Route Table quy định traffic đi đâu khi đi ra khỏi subnet
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-public-rt
+
+  # Route mặc định: tất cả traffic (0.0.0.0/0) -> IGW
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Gắn Public RT vào Public Subnet
+  PublicSubnetRTAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # --- Private Route Table ------------------------------------
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-private-rt
+
+  # Route mặc định: traffic Private Subnet -> NAT Gateway
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway   # Khác với Public: dùng NAT thay vì IGW
+
+  # Gắn Private RT vào Private Subnet
+  PrivateSubnetRTAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+# ==============================================================
+# OUTPUTS — Giá trị xuất ra để stack khác (EC2 stack) dùng
+# ==============================================================
+Outputs:
+  VpcId:
+    Description: ID cua VPC
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${ProjectName}-VpcId   # Export để stack khác import
+
+  PublicSubnetId:
+    Description: ID cua Public Subnet
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub ${ProjectName}-PublicSubnetId
+
+  PrivateSubnetId:
+    Description: ID cua Private Subnet
+    Value: !Ref PrivateSubnet
+    Export:
+      Name: !Sub ${ProjectName}-PrivateSubnetId
+
+  NatGatewayEIP:
+    Description: Elastic IP cua NAT Gateway
+    Value: !Ref NatEIP
+    Export:
+      Name: !Sub ${ProjectName}-NatEIP

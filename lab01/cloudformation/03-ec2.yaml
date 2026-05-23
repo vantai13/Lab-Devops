@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NT548 Lab01 - EC2 Stack
+  Tao Bastion Host (Public) va App Server (Private)
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: nt548-lab01
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues: [t2.micro, t3.micro, t3.small]
+    Description: "Loai EC2 (t2.micro nam trong Free Tier)"
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: vantai-keypair
+    Description: "Ten Key Pair da tao tren AWS Console (de SSH)"
+
+Resources:
+
+  # --- Bastion Host (Public EC2) -----------------------------
+  # Dùng CloudFormation thay vì hardcode AMI:
+  # AWS::SSM::Parameter::Value lấy AMI mới nhất từ SSM Parameter Store
+  BastionHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      # Amazon Linux 2023 AMI mới nhất — tự động cập nhật, không hardcode
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      InstanceType: !Ref InstanceType
+      SubnetId:
+        Fn::ImportValue:
+          Fn::Sub: ${ProjectName}-PublicSubnetId
+      SecurityGroupIds:
+        - Fn::ImportValue:
+            Fn::Sub: ${ProjectName}-BastionSGId
+      KeyName: !Ref KeyName
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-bastion
+
+  # --- App Server (Private EC2) ------------------------------
+  AppServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      InstanceType: !Ref InstanceType
+      SubnetId:
+        Fn::ImportValue:
+          Fn::Sub: ${ProjectName}-PrivateSubnetId
+      SecurityGroupIds:
+        - Fn::ImportValue:
+            Fn::Sub: ${ProjectName}-AppSGId
+      KeyName: !Ref KeyName
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-app
+
+Outputs:
+  BastionPublicIP:
+    Description: "Public IP cua Bastion Host — dung de SSH"
+    Value: !GetAtt BastionHost.PublicIp
+
+  AppPrivateIP:
+    Description: "Private IP cua App Server — SSH qua Bastion"
+    Value: !GetAtt AppServer.PrivateIp

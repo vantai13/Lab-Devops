@@ -1,6 +1,6 @@
 resource "aws_security_group" "bastion" {
   name        = "${var.project_name}-bastion-sg"
-  description = "SG for Bastion Host — SSH only from admin IP"
+  description = "SG for Bastion Host - SSH only from admin IP"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -25,7 +25,7 @@ resource "aws_security_group" "bastion" {
 
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-app-sg"
-  description = "SG for App Server — only accessible from Bastion"
+  description = "SG for App Server - only accessible from Bastion"
   vpc_id      = var.vpc_id
 
   ingress {

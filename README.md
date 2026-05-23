@@ -30,7 +30,7 @@ Internet Gateway
 
 - AWS CLI đã cài và cấu hình (`aws configure`)
 - Terraform >= 1.5
-- EC2 Key Pair đã tạo trên AWS Console (tên: `nt548-key`)
+- EC2 Key Pair đã tạo trên AWS Console (tên: `vantai-keypair`)
 
 ---
 
@@ -83,16 +83,16 @@ terraform destroy
 
 ```bash
 # SSH vào Bastion Host
-ssh -i ~/.ssh/nt548-key.pem ec2-user@<BASTION_PUBLIC_IP>
+ssh -i ~/.ssh/vantai-keypair.pem ec2-user@<BASTION_PUBLIC_IP>
 
 # SSH vào App Server (từ Bastion)
 # Cách 1: Jump thẳng qua Bastion
-ssh -i ~/.ssh/nt548-key.pem \
+ssh -i ~/.ssh/vantai-keypair.pem \
     -o ProxyJump=ec2-user@<BASTION_PUBLIC_IP> \
     ec2-user@<APP_PRIVATE_IP>
 
 # Cách 2: SSH vào Bastion trước, rồi SSH tiếp vào App
-ssh -A -i ~/.ssh/nt548-key.pem ec2-user@<BASTION_PUBLIC_IP>
+ssh -A -i ~/.ssh/vantai-keypair.pem ec2-user@<BASTION_PUBLIC_IP>
 # (Trong Bastion)
 ssh ec2-user@<APP_PRIVATE_IP>
 ```
@@ -139,7 +139,7 @@ aws cloudformation deploy \
 aws cloudformation deploy \
   --template-file lab01/cloudformation/03-ec2.yaml \
   --stack-name nt548-lab01-ec2 \
-  --parameter-overrides ProjectName=nt548-lab01 KeyName=nt548-key \
+  --parameter-overrides ProjectName=nt548-lab01 KeyName=vantai-keypair \
   --region ap-southeast-1
 ```
 

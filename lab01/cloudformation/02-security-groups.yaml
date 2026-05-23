@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  NT548 Lab01 - Security Group Stack
+  Tao Security Groups cho Bastion Host va App Server
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: nt548-lab01
+
+  # IP của bạn để SSH — lấy bằng: curl ifconfig.me
+  MyIP:
+    Type: String
+    Description: "IP cua ban (curl ifconfig.me), them /32. Vi du: 203.162.0.1/32"
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/32$'
+    ConstraintDescription: "Phai o dang x.x.x.x/32"
+
+Resources:
+
+  # --- Bastion Security Group --------------------------------
+  BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-bastion-sg
+      GroupDescription: "SSH gateway - chi cho phep tu admin IP"
+      # Import VpcId từ VPC Stack đã deploy trước
+      VpcId:
+        Fn::ImportValue:
+          Fn::Sub: ${ProjectName}-VpcId
+
+      SecurityGroupIngress:
+        - Description: "SSH chi tu IP cua admin"
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref MyIP   # ✅ Dùng IP cụ thể, không phải 0.0.0.0/0
+
+      SecurityGroupEgress:
+        - Description: "Allow all outbound"
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-bastion-sg
+
+  # --- App Server Security Group -----------------------------
+  AppSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ProjectName}-app-sg
+      GroupDescription: "App server - chi truy cap tu Bastion SG"
+      VpcId:
+        Fn::ImportValue:
+          Fn::Sub: ${ProjectName}-VpcId
+
+      SecurityGroupIngress:
+        # SSH từ Bastion SG (dùng SG reference, an toàn hơn CIDR)
+        - Description: "SSH chi tu Bastion SG"
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSG
+
+        # App port từ trong VPC
+        - Description: "App port 3000 tu VPC"
+          IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 10.0.0.0/16
+
+      SecurityGroupEgress:
+        - Description: "Allow all outbound (qua NAT Gateway)"
+          IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-app-sg
+
+Outputs:
+  BastionSGId:
+    Description: Security Group ID cua Bastion Host
+    Value: !Ref BastionSG
+    Export:
+      Name: !Sub ${ProjectName}-BastionSGId
+
+  AppSGId:
+    Description: Security Group ID cua App Server
+    Value: !Ref AppSG
+    Export:
+      Name: !Sub ${ProjectName}-AppSGId
