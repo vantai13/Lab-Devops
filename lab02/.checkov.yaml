@@ -1,0 +1,26 @@
+# Tài liệu: https://www.checkov.io/2.Basics/CLI%20Command%20Reference.html
+
+framework:
+  - terraform
+
+# Thư mục quét
+directory:
+  - lab02/terraform
+
+# Bỏ qua các check không cần thiết cho bài lab này
+skip-check:
+  # CKV_AWS_8: EC2 dùng key_name thay vì IAM Instance Profile
+  - CKV_AWS_8
+  # CKV2_AWS_41: IAM role flow log không cần MFA — đây là service role
+  - CKV2_AWS_41
+  # CKV_AWS_338: CloudWatch log retention > 1 năm — 7 ngày đủ cho Lab
+  - CKV_AWS_338
+
+# Xuất kết quả dưới dạng JSON để CI/CD xử lý
+output: cli
+
+# Compact mode: chỉ hiện failed checks
+compact: true
+
+# Dừng pipeline nếu có lỗi severity HIGH hoặc CRITICAL
+soft-fail: false

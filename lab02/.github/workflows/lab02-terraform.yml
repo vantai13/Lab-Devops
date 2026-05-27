@@ -1,0 +1,267 @@
+name: "Lab02 - Terraform CI/CD with Checkov"
+
+# ================================================================
+# TRIGGER: Khi nào workflow này chạy?
+# ================================================================
+on:
+  push:
+    branches:
+      - main        # Push lên main → chạy plan + apply
+      - develop     # Push lên develop → chỉ chạy plan (không apply)
+    paths:
+      - "lab02/terraform/**"
+      - ".github/workflows/lab02-terraform.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "lab02/terraform/**"
+  workflow_dispatch: # Cho phép chạy thủ công từ GitHub UI
+
+# ================================================================
+# PERMISSIONS
+# ================================================================
+permissions:
+  contents: read
+  pull-requests: write
+
+# ================================================================
+# ENV: Biến môi trường dùng chung
+# ================================================================
+env:
+  TF_VERSION: "1.7.5"
+  TF_WORKING_DIR: "lab02/terraform"
+  AWS_REGION: "ap-southeast-1"
+
+  # Các biến Terraform không nhạy cảm — dùng prefix TF_VAR_ để Terraform tự đọc
+  # Không cần truyền -var="..." khi chạy lệnh nữa
+  TF_VAR_aws_region: "ap-southeast-1"
+  TF_VAR_project_name: "nt548-lab02"
+  TF_VAR_environment: "dev"
+  TF_VAR_vpc_cidr: "10.0.0.0/16"
+  TF_VAR_public_subnet_cidr: "10.0.1.0/24"
+  TF_VAR_private_subnet_cidr: "10.0.2.0/24"
+  TF_VAR_instance_type: "t3.micro"
+
+# ================================================================
+# JOBS
+# ================================================================
+jobs:
+
+  # ──────────────────────────────────────────────────────────────
+  # JOB 1: Checkov Security Scan
+  # ──────────────────────────────────────────────────────────────
+  checkov-scan:
+    name: "Checkov Security Scan"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Checkout source code"
+        uses: actions/checkout@v4
+
+      - name: "Setup Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "Install Checkov"
+        run: pip install checkov
+
+      - name: "Run Checkov scan"
+        run: |
+          checkov \
+            --directory ${{ env.TF_WORKING_DIR }} \
+            --config-file lab02/.checkov.yaml \
+            --output cli \
+            --output junitxml \
+            --output-file-path . \
+            --soft-fail
+
+      - name: "Upload Checkov report"
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkov-report
+          path: results_junitxml.xml
+
+      - name: "Check Checkov exit code"
+        run: |
+          checkov \
+            --directory ${{ env.TF_WORKING_DIR }} \
+            --config-file lab02/.checkov.yaml \
+            --compact \
+            --output cli
+
+  # ──────────────────────────────────────────────────────────────
+  # JOB 2: Terraform Plan
+  # ──────────────────────────────────────────────────────────────
+  terraform-plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: checkov-scan
+
+    outputs:
+      plan-exit-code: ${{ steps.plan.outputs.exitcode }}
+
+    # Khai báo TF_VAR nhạy cảm ở đây để chỉ job này mới có
+    env:
+      TF_VAR_my_ip: ${{ secrets.MY_IP }}
+      TF_VAR_key_name: ${{ secrets.KEY_NAME }}
+
+    steps:
+      - name: "Checkout source code"
+        uses: actions/checkout@v4
+
+      - name: "Setup Terraform ${{ env.TF_VERSION }}"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: "Configure AWS credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: "Terraform Init"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: "Terraform Format Check"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: "Terraform Validate"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: "Terraform Plan"
+        id: plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        # Không cần -var nữa vì tất cả đã có trong TF_VAR_* ở env
+        run: |
+          terraform plan \
+            -out=tfplan \
+            -detailed-exitcode \
+            -no-color 2>&1 | tee plan_output.txt
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: "Save plan output as artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: |
+            ${{ env.TF_WORKING_DIR }}/tfplan
+            ${{ env.TF_WORKING_DIR }}/plan_output.txt
+
+      - name: "Comment Plan result on PR"
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('${{ env.TF_WORKING_DIR }}/plan_output.txt', 'utf8');
+            const truncated = planOutput.length > 60000
+              ? planOutput.substring(0, 60000) + '\n... [output truncated]'
+              : planOutput;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan Output\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });
+
+  # ──────────────────────────────────────────────────────────────
+  # JOB 3: Terraform Apply
+  # ──────────────────────────────────────────────────────────────
+  terraform-apply:
+    name: "Terraform Apply"
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: |
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.terraform-plan.outputs.plan-exit-code == '2'
+
+    environment:
+      name: production
+
+    # Apply dùng tfplan đã được build sẵn → không cần TF_VAR nhạy cảm nữa
+    # (tfplan đã chứa sẵn giá trị được tính toán từ bước Plan)
+    steps:
+      - name: "Checkout source code"
+        uses: actions/checkout@v4
+
+      - name: "Setup Terraform ${{ env.TF_VERSION }}"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: "Configure AWS credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: "Download plan artifact"
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: "Terraform Init"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: "Terraform Apply"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: "Show Outputs"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform output
+
+  # ──────────────────────────────────────────────────────────────
+  # JOB 4: Terraform Destroy (manual trigger)
+  # ──────────────────────────────────────────────────────────────
+  terraform-destroy:
+    name: "Terraform Destroy"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    environment:
+      name: production
+
+    env:
+      TF_VAR_my_ip: ${{ secrets.MY_IP }}
+      TF_VAR_key_name: ${{ secrets.KEY_NAME }}
+
+    steps:
+      - name: "Checkout source code"
+        uses: actions/checkout@v4
+
+      - name: "Setup Terraform ${{ env.TF_VERSION }}"
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: "Configure AWS credentials"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: "Terraform Init"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform init
+
+      - name: "Terraform Destroy"
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        # Không cần -var nữa vì TF_VAR_* đã có trong env của job này
+        run: terraform destroy -auto-approve

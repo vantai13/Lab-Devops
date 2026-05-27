@@ -19,7 +19,20 @@ build/
 .DS_Store
 Thumbs.db
 
-# Terraform state — chứa thông tin nhạy cảm về infra
+# Terraform
+*.tfvars
+*.tfvars.json
 *.tfstate
+*.tfstate.*
 *.tfstate.backup
+
+# Terraform plan output (có thể chứa secrets dạng plaintext)
+tfplan
+*.tfplan
+
+# ─────────────────────────────────────────────────────────────────
+# TERRAFORM WORKING DIRECTORY
+# Tạo lại bằng: terraform init
+# ─────────────────────────────────────────────────────────────────
 .terraform/
+.terraform.lock.hcl
