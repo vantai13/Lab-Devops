@@ -81,9 +81,6 @@ resource "aws_flow_log" "main" {
 resource "aws_cloudwatch_log_group" "flow_log" {
   name              = "/aws/vpc/${var.project_name}-flow-logs"
   retention_in_days = 7 # Giữ log 7 ngày để tiết kiệm chi phí
-  lifecycle {
-    ignore_changes  = all
-  }
 
   tags = { Name = "${var.project_name}-flow-log-group" }
 }
