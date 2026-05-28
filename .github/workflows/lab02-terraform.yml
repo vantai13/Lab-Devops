@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - main        # Push lên main → chạy plan + apply
-      - develop     # Push lên develop → chỉ chạy plan (không apply)
+      - dev     # Push lên dev → chỉ chạy plan (không apply)
     paths:
       - "lab02/terraform/**"
       - ".github/workflows/lab02-terraform.yml"
