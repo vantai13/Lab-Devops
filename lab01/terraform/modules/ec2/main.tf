@@ -22,7 +22,7 @@ resource "aws_instance" "bastion" {
   key_name                    = var.key_name
   associate_public_ip_address = true  
 
-  tags = { Name = "${var.project_name}-bastion" }
+  tags = { Name = "${var.project_name}-bastion-host" }
 }
 
 
