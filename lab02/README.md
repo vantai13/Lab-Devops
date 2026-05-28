@@ -361,6 +361,80 @@ Có 10 check được **skip có chủ đích** trong `.checkov.yaml`. Mỗi che
 
 ---
 
+
+## Cấu hình S3 Backend cho GitHub Actions
+
+> Bỏ qua phần này nếu chỉ muốn chạy **local**.
+
+Mặc định, Terraform lưu `terraform.tfstate` **trên máy đang chạy**. Khi chạy GitHub Actions, mỗi job khởi động một runner mới hoàn toàn — nên nếu không có remote backend, job Destroy sẽ không thấy state và báo `0 destroyed`.
+
+Giải pháp là dùng **S3 làm remote backend** để tất cả các job đều đọc/ghi chung một state file.
+
+### Bước 1 — Tạo S3 Bucket và DynamoDB Table (chỉ làm 1 lần)
+
+```bash
+# Tạo S3 bucket (đặt tên duy nhất, ví dụ: nt548-lab02-tfstate)
+aws s3api create-bucket \
+  --bucket <TÊN-BUCKET-CỦA-BẠN> \
+  --region ap-southeast-1 \
+  --create-bucket-configuration LocationConstraint=ap-southeast-1
+
+# Bật versioning để có thể rollback state nếu cần
+aws s3api put-bucket-versioning \
+  --bucket <TÊN-BUCKET-CỦA-BẠN> \
+  --versioning-configuration Status=Enabled
+
+# Tạo DynamoDB table để lock state (tránh 2 job chạy cùng lúc gây conflict)
+aws dynamodb create-table \
+  --table-name terraform-lock \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region ap-southeast-1
+```
+
+### Bước 2 — Uncomment block backend trong main.tf
+
+Mở file `lab02/terraform/main.tf`, tìm đoạn được comment và uncomment + điền tên bucket:
+
+```hcl
+backend "s3" {
+  bucket         = "<TÊN-BUCKET-CỦA-BẠN>"  # ← điền tên bucket vừa tạo
+  key            = "lab02/terraform.tfstate"
+  region         = "ap-southeast-1"
+  dynamodb_table = "terraform-lock"
+  encrypt        = true
+}
+```
+
+### Bước 3 — Chạy terraform init để migrate state (nếu đã có state local)
+
+```bash
+cd lab02/terraform
+terraform init -migrate-state
+# Gõ "yes" khi được hỏi có muốn copy state lên S3 không
+```
+
+### Bước 4 — Push code lên GitHub
+
+Sau khi uncomment và điền tên bucket, push code lên. GitHub Actions sẽ tự động đọc state từ S3 ở tất cả các job (Plan, Apply, Destroy).
+
+### Cơ chế hoạt động
+
+```
+terraform init
+  → đọc block backend "s3" trong main.tf
+  → kết nối tới S3: <bucket>/lab02/terraform.tfstate
+  → pull state về
+
+terraform apply  →  push state (24 resources) lên S3
+terraform destroy  →  pull state từ S3  →  destroy đúng 24 resources ✅
+```
+
+> ⚠️ **Lưu ý:** Khi quay về chạy local, hãy **comment lại** block backend trong `main.tf` và chạy `terraform init` lại. Nếu để nguyên backend S3 khi chạy local thì Terraform sẽ vẫn đọc/ghi state trên S3 — hoàn toàn được, nhưng cần đảm bảo AWS credentials local của bạn có quyền truy cập bucket đó.
+
+---
+
 ## Lưu ý quan trọng
 
 - File `terraform.tfvars` chỉ dùng ở **local**, không được commit lên GitHub

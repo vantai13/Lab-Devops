@@ -1,6 +1,40 @@
 terraform {
   required_version = ">= 1.5"
 
+  # ================================================================
+  # REMOTE BACKEND — S3
+  # ================================================================
+  # HƯỚNG DẪN:
+  #   - Chạy LOCAL  → comment toàn bộ block "backend" bên dưới
+  #   - Chạy GitHub Actions → tạo S3 bucket + DynamoDB table trước,
+  #     sau đó uncomment và điền tên bucket vào rồi push code
+  #
+  # Tạo S3 bucket (chỉ làm 1 lần):
+  #   aws s3api create-bucket \
+  #     --bucket nt548-lab02-tfstate \
+  #     --region ap-southeast-1 \
+  #     --create-bucket-configuration LocationConstraint=ap-southeast-1
+  #   aws s3api put-bucket-versioning \
+  #     --bucket nt548-lab02-tfstate-dedt \
+  #     --versioning-configuration Status=Enabled
+  #
+  # Tạo DynamoDB table để lock state (chỉ làm 1 lần):
+  #   aws dynamodb create-table \
+  #     --table-name terraform-lock \
+  #     --attribute-definitions AttributeName=LockID,AttributeType=S \
+  #     --key-schema AttributeName=LockID,KeyType=HASH \
+  #     --billing-mode PAY_PER_REQUEST \
+  #     --region ap-southeast-1
+  # ================================================================
+
+  backend "s3" {
+    bucket         = "nt548-lab02-tfstate-dedt"
+    key            = "lab02/terraform.tfstate"
+    region         = "ap-southeast-1"
+    dynamodb_table = "terraform-lock"
+    encrypt        = true
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
