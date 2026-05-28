@@ -142,12 +142,21 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         # Không cần -var nữa vì tất cả đã có trong TF_VAR_* ở env
         run: |
+          # Dùng PIPESTATUS để lấy exit code của terraform, không phải của tee
+          set +e
           terraform plan \
             -out=tfplan \
             -detailed-exitcode \
             -no-color 2>&1 | tee plan_output.txt
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
-        continue-on-error: true
+          TF_EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+          echo "exitcode=${TF_EXIT_CODE}" >> $GITHUB_OUTPUT
+          # exit code: 0=không thay đổi, 1=lỗi, 2=có thay đổi
+          if [ "${TF_EXIT_CODE}" -eq 1 ]; then
+            echo "Terraform plan failed!"
+            exit 1
+          fi
+        continue-on-error: false
 
       - name: "Save plan output as artifact"
         uses: actions/upload-artifact@v4

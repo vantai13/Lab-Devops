@@ -37,7 +37,7 @@ resource "aws_instance" "bastion" {
     volume_size = 30
   }
 
-  tags = { Name = "${var.project_name}-bastion-host" }
+  tags = { Name = "${var.project_name}-bastion" }
 }
 
 # App Server — nằm ở Private Subnet, không có Public IP
